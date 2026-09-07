@@ -3,6 +3,7 @@ import io
 import base64
 import time
 import json
+from dotenv import load_dotenv
 
 import streamlit as st
 import fitz
@@ -12,23 +13,23 @@ from gtts import gTTS
 from audio_recorder_streamlit import audio_recorder
 import speech_recognition as sr
 
+# Load environment variables from .env file
+load_dotenv()
+
 # =========================================================
-# 1. API KEY SETUP (SECURE FROM ENVIRONMENT)
+# 1. GEMINI API KEY SETUP (READ FROM ENV FILE)
 # =========================================================
 
 MY_GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
 
 client = None
-if MY_GEMINI_KEY and len(MY_GEMINI_KEY.strip()) > 10:
-    try:
-        os.environ["GEMINI_API_KEY"] = MY_GEMINI_KEY.strip()
-        client = genai.Client(api_key=MY_GEMINI_KEY.strip())
-    except Exception:
-        client = None
+_startup_error = None
 
-# =========================================================
-# 2. HIGH-CONTRAST MODERN LIGHT UI THEME
-# =========================================================
+if MY_GEMINI_KEY and len(MY_GEMINI_KEY.strip()) > 10 and "PASTE_YOUR" not in MY_GEMINI_KEY:
+    try:
+        client = genai.Client(api_key=MY_GEMINI_KEY.strip())
+    except Exception as e:
+        _startup_error = str(e)
 
 st.set_page_config(
     page_title="AI Voice Recruiter Pro",
@@ -55,17 +56,17 @@ st.markdown(
     }
 
     .header-card {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%);
         color: #ffffff;
-        padding: 28px;
-        border-radius: 20px;
+        padding: 32px;
+        border-radius: 22px;
         text-align: center;
-        box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
-        margin-bottom: 24px;
+        box-shadow: 0 14px 30px rgba(30, 58, 138, 0.18);
+        margin-bottom: 26px;
         border: 1px solid #334155;
     }
-    .header-title { font-size: 32px; font-weight: 800; margin: 0; color: #ffffff; }
-    .header-subtitle { font-size: 15px; color: #38bdf8; margin-top: 6px; font-weight: 600; }
+    .header-title { font-size: 34px; font-weight: 800; margin: 0; color: #ffffff; letter-spacing: -0.5px; }
+    .header-subtitle { font-size: 15px; color: #7dd3fc; margin-top: 8px; font-weight: 600; }
 
     .cv-summary-card {
         background: #ffffff;
@@ -78,19 +79,19 @@ st.markdown(
     }
 
     .q-card {
-        background: #ffffff;
-        padding: 26px;
+        background: #f8fbff;
+        padding: 28px;
         border-radius: 18px;
         border-left: 6px solid #2563eb;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.04);
-        font-size: 20px;
+        box-shadow: 0 10px 25px rgba(37, 99, 235, 0.06);
+        font-size: 21px;
         color: #0f172a;
-        line-height: 1.6;
+        line-height: 1.65;
         font-weight: 600;
         margin-bottom: 20px;
-        border-top: 1px solid #e2e8f0;
-        border-right: 1px solid #e2e8f0;
-        border-bottom: 1px solid #e2e8f0;
+        border-top: 1px solid #dbeafe;
+        border-right: 1px solid #dbeafe;
+        border-bottom: 1px solid #dbeafe;
     }
 
     .robot-container {
@@ -182,7 +183,7 @@ st.markdown(
 )
 
 # =========================================================
-# 3. SIDEBAR CONTROL PANEL
+# 2. SIDEBAR CONTROL PANEL
 # =========================================================
 
 st.sidebar.title("📌 Recruiter Control Panel")
@@ -211,10 +212,17 @@ elif selected_role != "Select Position...":
 if "ai_mode" not in st.session_state:
     st.session_state.ai_mode = "Checking Engine..."
 
-st.sidebar.markdown(f"**⚡ AI Engine Status:**\n`{st.session_state.ai_mode}`")
+if "last_ai_error" not in st.session_state:
+    st.session_state.last_ai_error = _startup_error or ""
+
+# Debug Info in Sidebar
+st.sidebar.markdown(f"**⚡ AI Engine Status:**\n\n{st.session_state.ai_mode}")
+if st.session_state.last_ai_error:
+    with st.sidebar.expander("🔎 Last Gemini Error"):
+        st.code(st.session_state.last_ai_error)
 
 # =========================================================
-# 4. LOCAL FALLBACK & ROLES SETUP
+# 3. LOCAL FALLBACK & ROLES SETUP
 # =========================================================
 
 LOCAL_QUESTIONS = {
@@ -273,17 +281,17 @@ def get_local_question(job_position, question_number):
     return f"Can you explain a key technical project relevant to {job_position}?"
 
 # =========================================================
-# 5. ACTIVATED GEMINI AI ENGINE
+# 4. GEMINI CALL ENGINE
 # =========================================================
 
 def call_ai(prompt, response_type="question", job_position="", question_number=1, candidate_name="Candidate"):
     if client is not None:
         models_to_try = [
             "gemini-2.5-flash",
-            "gemini-1.5-flash",
-            "gemini-1.5-pro"
+            "gemini-1.5-flash"
         ]
-        
+
+        errors = []
         for model_name in models_to_try:
             try:
                 response = client.models.generate_content(
@@ -292,6 +300,7 @@ def call_ai(prompt, response_type="question", job_position="", question_number=1
                 )
                 if response and response.text:
                     st.session_state.ai_mode = f"🟢 Gemini Active ({model_name})"
+                    st.session_state.last_ai_error = ""
                     if response_type == "json":
                         clean_txt = response.text.strip()
                         if "```json" in clean_txt:
@@ -300,8 +309,11 @@ def call_ai(prompt, response_type="question", job_position="", question_number=1
                             clean_txt = clean_txt.split("```")[1].split("```")[0]
                         return json.loads(clean_txt.strip())
                     return response.text.strip()
-            except Exception:
+            except Exception as e:
+                errors.append(f"{model_name}: {e}")
                 continue
+
+        st.session_state.last_ai_error = "\n".join(errors)
 
     st.session_state.ai_mode = "🔴 Local Engine (Fallback Mode)"
     if response_type == "question":
@@ -321,13 +333,14 @@ def call_ai(prompt, response_type="question", job_position="", question_number=1
             "problematic_ideas": ["Responses lack complete detail"],
             "strengths": ["Submitted basic interview responses"],
             "weaknesses": ["Voice transcript incomplete or answers lack depth"],
+            "question_breakdown": [],
             "recommendation": "Reject",
             "strict_decision_reason": "Low response clarity and incomplete technical accuracy."
         }
     return "Response generated."
 
 # =========================================================
-# 6. AUDIO TTS & STT ENGINE
+# 5. AUDIO TTS & STT ENGINE
 # =========================================================
 
 def text_to_speech_autoplay(text, q_num=1):
@@ -363,7 +376,7 @@ def transcribe_audio(audio_bytes):
         return ""
 
 # =========================================================
-# 7. MAIN INTERVIEW ENGINE
+# 6. MAIN INTERVIEW ENGINE
 # =========================================================
 
 ROBOT_AVATAR = "https://img.freepik.com/free-vector/cute-robot-holding-phone-hand-waving-vector-icon-illustration-robot-technology-icon-concept-isolated_138676-5080.jpg"
@@ -391,7 +404,8 @@ if uploaded_file is not None and job_position:
             st.stop()
 
         candidate_id = f"{uploaded_file.name}_{matched_role}"
-        
+
+        # SESSION STATE INITIALIZATION
         if "candidate_id" not in st.session_state or st.session_state.candidate_id != candidate_id:
             st.session_state.candidate_id = candidate_id
             st.session_state.current_q_num = 1
@@ -408,6 +422,7 @@ if uploaded_file is not None and job_position:
         if "final_eval" not in st.session_state:
             st.session_state.final_eval = None
 
+        # DETAILED CV ANALYSIS SUMMARY
         if st.session_state.cv_analysis is None:
             with st.spinner("🤖 Extracting CV Information & Skills..."):
                 cv_prompt = f"""
@@ -466,6 +481,7 @@ if uploaded_file is not None and job_position:
 
             current_question = st.session_state[question_key]
 
+            # HEADER TOP ROW
             c_bot, c_info, c_timer = st.columns([1.5, 3.5, 2])
 
             with c_bot:
@@ -483,6 +499,7 @@ if uploaded_file is not None and job_position:
                 st.markdown(f"### 🎤 Question {q_num} of 5")
                 st.progress(q_num / 5)
 
+            # TIMER
             with c_timer:
                 timer_html = f"""
                 <div class="timer-card">
@@ -542,7 +559,7 @@ if uploaded_file is not None and job_position:
             )
 
             if st.button(f"Submit Answer Q{q_num} ➡️", type="primary"):
-                final_text = user_ans.strip() if user_ans.strip() else "[No Answer Provided / Time Expired]"
+                final_text = user_ans.strip() if user_ans.strip() else "[Skipped / No Answer Provided]"
                 st.session_state.interview_history.append({
                     "question": current_question,
                     "answer": final_text
@@ -562,13 +579,11 @@ if uploaded_file is not None and job_position:
                 CV Skills: {json.dumps(cv_info.get('skills', []))}
                 Interview Transcript: {json.dumps(st.session_state.interview_history)}
 
-                Perform a strict decision based on:
-                1. Voice & Response Completeness (Heavy deduction for empty or default answers).
-                2. Technical Correctness.
-                3. Skill Match against CV claims.
-                4. Problematic ideas / Red flags (e.g. invalid technical logic, evasive answers, or generic statements).
-
-                Recommendation must strictly be one of: "Strong Hire", "Conditional Hire", or "Reject".
+                Detailed Instructions for Evaluation:
+                1. Check each question one-by-one. Identify if the user skipped the question, provided incorrect answers, or gave incomplete responses.
+                2. Explain explicitly where the candidate made mistakes or what technical details were missing.
+                3. Calculate scores (0-100) based strictly on accurate answers.
+                4. Recommendation must strictly be one of: "Strong Hire", "Conditional Hire", or "Reject".
 
                 Return strictly JSON format:
                 {{
@@ -578,23 +593,32 @@ if uploaded_file is not None and job_position:
                     "technical_score": <0-100>,
                     "voice_confidence": <0-100>,
                     "skill_match": <0-100>,
-                    "problematic_ideas": ["Red flag 1", "Problematic concept 2"],
                     "strengths": ["Strength 1", "Strength 2"],
                     "weaknesses": ["Weakness 1", "Weakness 2"],
+                    "problematic_ideas": ["Red flag 1", "Skipped question issue"],
+                    "question_breakdown": [
+                        {{
+                            "question": "<Question Text>",
+                            "candidate_answer": "<Candidate Response>",
+                            "status": "<Correct / Incomplete / Skipped / Incorrect>",
+                            "feedback": "<Specific feedback on mistake or missing concepts>"
+                        }}
+                    ],
                     "recommendation": "<Strong Hire / Conditional Hire / Reject>",
-                    "strict_decision_reason": "<Clear detailed decision justification>"
+                    "strict_decision_reason": "<Clear detailed justification explaining overall performance and mistakes>"
                 }}
                 """
                 with st.spinner("📊 Gemini evaluating final scorecard..."):
                     st.session_state.final_eval = call_ai(
-                        eval_prompt, 
-                        response_type="json", 
+                        eval_prompt,
+                        response_type="json",
                         job_position=job_position,
                         candidate_name=candidate_name
                     )
 
             res = st.session_state.final_eval or {}
 
+            # DASHBOARD METRICS
             m1, m2, m3, m4 = st.columns(4)
             m1.markdown(f'<div class="metric-card-pro"><div class="metric-title-pro">Overall Rating</div><div class="metric-value-pro">{res.get("overall_score", 0)}%</div></div>', unsafe_allow_html=True)
             m2.markdown(f'<div class="metric-card-pro"><div class="metric-title-pro">Technical Score</div><div class="metric-value-pro">{res.get("technical_score", 0)}%</div></div>', unsafe_allow_html=True)
@@ -619,8 +643,27 @@ if uploaded_file is not None and job_position:
             )
 
             st.write("")
+
+            # QUESTION-BY-QUESTION FEEDBACK BREAKDOWN
+            st.markdown("### 🔍 Question-by-Question Detailed Analysis")
+            breakdown = res.get("question_breakdown", [])
+
+            if breakdown:
+                for idx, q_item in enumerate(breakdown, start=1):
+                    status = q_item.get("status", "Evaluated")
+                    status_color = "#16a34a" if status == "Correct" else "#d97706" if status == "Incomplete" else "#dc2626"
+
+                    with st.expander(f"Question {idx}: {q_item.get('question', '')} — [{status}]", expanded=True):
+                        st.write(f"**Candidate Answer:** {q_item.get('candidate_answer', 'N/A')}")
+                        st.markdown(f"<span style='color:{status_color}; font-weight:bold;'>Feedback / Mistake:</span> {q_item.get('feedback', 'No detailed feedback provided.')}", unsafe_allow_html=True)
+            else:
+                for idx, item in enumerate(st.session_state.interview_history, start=1):
+                    with st.expander(f"Question {idx}: {item['question']}", expanded=True):
+                        st.write(f"**Answer:** {item['answer']}")
+
+            st.write("")
             col_s, col_w, col_p = st.columns(3)
-            
+
             with col_s:
                 st.markdown("#### ✅ Strengths")
                 for s in res.get("strengths", []):
