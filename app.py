@@ -32,7 +32,7 @@ if MY_GEMINI_KEY and len(MY_GEMINI_KEY.strip()) > 10 and "PASTE_YOUR" not in MY_
         _startup_error = str(e)
 
 st.set_page_config(
-    page_title="AI Voice Recruiter Pro",
+    page_title="SimuHire - AI Voice Recruiter Pro",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -175,7 +175,7 @@ st.markdown(
 st.markdown(
     """
     <div class="header-card">
-        <div class="header-title">🤖 AI Voice Recruiter Pro</div>
+        <div class="header-title">🤖 SimuHire - AI Voice Recruiter Pro</div>
         <div class="header-subtitle">Intelligent HR Screening & Technical Assessment System</div>
     </div>
     """,
